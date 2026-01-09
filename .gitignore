@@ -50,3 +50,6 @@ ssl/
 
 # Claude Code settings
 .claude/
+
+# Git worktrees (local)
+.worktrees/
