@@ -36,6 +36,9 @@ function App() {
   const activeStreamingConvIdRef = useRef(null);
   // Track current conversation ID for streaming comparison (ref doesn't cause re-render issues)
   const currentConversationIdRef = useRef(null);
+  // Abort/cancel in-flight streaming request
+  const streamAbortControllerRef = useRef(null);
+  const streamAbortRequestedRef = useRef(false);
 
   // Helper to update streaming conversation state (handles case when user switched away)
   // FIX: Make ref the single source of truth, then sync React state from ref
@@ -264,6 +267,8 @@ function App() {
     if (!currentConversationId) return;
 
     setIsLoading(true);
+    streamAbortRequestedRef.current = false;
+    streamAbortControllerRef.current = new AbortController();
     // Store user content for auto-upload
     pendingMessageRef.current = content;
     // Track which conversation is streaming
@@ -520,6 +525,7 @@ function App() {
               streamingStateRef.current.delete(streamingConvId);
             }
             activeStreamingConvIdRef.current = null;
+            streamAbortControllerRef.current = null;
             // Reload conversations list
             loadConversations();
             setIsLoading(false);
@@ -535,6 +541,7 @@ function App() {
               streamingStateRef.current.delete(streamingConvId);
             }
             activeStreamingConvIdRef.current = null;
+            streamAbortControllerRef.current = null;
             setIsLoading(false);
             break;
           }
@@ -542,15 +549,56 @@ function App() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      }, attachments, webSearchProvider);
+      }, attachments, webSearchProvider, { signal: streamAbortControllerRef.current.signal });
     } catch (error) {
+      // Handle user-initiated abort (Stop button)
+      if (error?.name === 'AbortError' || streamAbortRequestedRef.current) {
+        addToast('Cancelled', 'warning', 2500);
+        updateStreamingState((prev) => {
+          const lastIdx = prev.messages.length - 1;
+          const lastMsg = prev.messages[lastIdx];
+          if (!lastMsg || lastMsg.role !== 'assistant') return prev;
+          const currentMetadata = lastMsg.metadata || {};
+          const currentLoading = lastMsg.loading || {};
+          const newLastMsg = {
+            ...lastMsg,
+            metadata: { ...currentMetadata, aborted: true },
+            loading: { ...currentLoading, stage1: false, stage2: false, stage3: false },
+          };
+          return { ...prev, messages: [...prev.messages.slice(0, -1), newLastMsg] };
+        });
+        // Clear streaming state
+        const streamingConvId = activeStreamingConvIdRef.current;
+        if (streamingConvId) {
+          streamingStateRef.current.delete(streamingConvId);
+        }
+        activeStreamingConvIdRef.current = null;
+        streamAbortControllerRef.current = null;
+        streamAbortRequestedRef.current = false;
+        setIsLoading(false);
+        // Reload conversation list (server may have saved partial)
+        setTimeout(loadConversations, 400);
+        return;
+      }
+
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
       setCurrentConversation((prev) => ({
         ...prev,
         messages: prev.messages.slice(0, -2),
       }));
+      streamAbortControllerRef.current = null;
       setIsLoading(false);
+    }
+  };
+
+  const handleAbortStream = () => {
+    if (!isLoading) return;
+    streamAbortRequestedRef.current = true;
+    try {
+      streamAbortControllerRef.current?.abort();
+    } catch (e) {
+      console.error('Failed to abort stream:', e);
     }
   };
 
@@ -597,6 +645,7 @@ function App() {
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
+        onAbort={handleAbortStream}
         onUploadFile={api.uploadFile}
         isLoading={isLoading}
         webSearchAvailable={webSearchAvailable}

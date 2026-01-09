@@ -346,9 +346,10 @@ export const api = {
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
    * @param {Array} attachments - Optional array of file attachments
    * @param {string} webSearchProvider - Web search provider: 'off', 'tavily', or 'exa'
+   * @param {Object} options - Optional fetch options (e.g., { signal })
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent, attachments = null, webSearchProvider = 'off') {
+  async sendMessageStream(conversationId, content, onEvent, attachments = null, webSearchProvider = 'off', options = {}) {
     const body = { content };
     if (attachments && attachments.length > 0) {
       body.attachments = attachments;
@@ -365,6 +366,7 @@ export const api = {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal: options?.signal,
       }
     );
 

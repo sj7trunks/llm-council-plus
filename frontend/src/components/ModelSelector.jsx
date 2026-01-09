@@ -7,6 +7,7 @@ const LAST_USED_KEY = 'llm-council-last-selection';
 const LAST_CHAIRMAN_KEY = 'llm-council-last-chairman';
 const LAST_EXECUTION_MODE_KEY = 'llm-council-last-execution-mode';
 const LAST_ROUTER_TYPE_KEY = 'llm-council-last-router-type';
+const SAVED_PRESETS_KEY = 'llm-council-saved-presets-v1';
 
 // Default max models (can be overridden by backend config)
 const DEFAULT_MAX_MODELS = 5;
@@ -36,7 +37,37 @@ const BUILT_IN_PRESETS = {
   },
 };
 
-const MIN_MODELS = 3;
+const MIN_MODELS = 2;
+
+function safeJsonParse(raw, fallback) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function loadSavedPresets() {
+  try {
+    const raw = localStorage.getItem(SAVED_PRESETS_KEY);
+    const parsed = safeJsonParse(raw, []);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSavedPresets(presets) {
+  try {
+    localStorage.setItem(SAVED_PRESETS_KEY, JSON.stringify(presets));
+  } catch (e) {
+    console.error('Failed to save presets:', e);
+  }
+}
+
+function generatePresetId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 // Sort options
 const SORT_OPTIONS = [
@@ -59,6 +90,13 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
   const [routerType, setRouterType] = useState('openrouter'); // openrouter | ollama
   const [activePreset, setActivePreset] = useState(null);
   const [maxModels, setMaxModels] = useState(DEFAULT_MAX_MODELS);
+  const [councilSize, setCouncilSize] = useState(Math.min(DEFAULT_MAX_MODELS, 5));
+
+  // Saved presets (user-defined)
+  const [savedPresets, setSavedPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [newPresetName, setNewPresetName] = useState('');
+  const [pendingPreset, setPendingPreset] = useState(null);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,6 +112,7 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
   // Load models when modal opens
   useEffect(() => {
     if (isOpen) {
+      setSavedPresets(loadSavedPresets());
       loadModels();
     }
   }, [isOpen]);
@@ -84,6 +123,37 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
       loadLastUsedSelection();
     }
   }, [allModels, isOpen]);
+
+  // Clamp council size when maxModels changes.
+  useEffect(() => {
+    setCouncilSize((prev) => Math.min(maxModels, Math.max(MIN_MODELS, prev || MIN_MODELS)));
+  }, [maxModels]);
+
+  // Apply a pending preset once models are loaded (e.g., after router switch).
+  useEffect(() => {
+    if (!pendingPreset) return;
+    if (!isOpen) return;
+    if (allModels.length === 0) return;
+
+    const preset = pendingPreset;
+    setPendingPreset(null);
+
+    const validModels = (preset.models || []).filter((m) => allModels.some((am) => am.id === m));
+    const validChairman = allModels.some((am) => am.id === preset.chairman) ? preset.chairman : '';
+
+    if (validModels.length < MIN_MODELS || !validChairman) {
+      setLoadError('Preset models are not available for the selected router.');
+      return;
+    }
+
+    setSelectedModels(validModels.slice(0, maxModels));
+    setChairmanModel(validChairman);
+    if (preset.executionMode) setExecutionMode(preset.executionMode);
+    if (preset.councilSize) setCouncilSize(Math.min(maxModels, Math.max(MIN_MODELS, preset.councilSize)));
+    setActivePreset(`saved:${preset.id}`);
+    setSelectedPresetId(preset.id);
+    setTimeout(() => scrollToModel(validModels[0]), 100);
+  }, [pendingPreset, allModels, isOpen, maxModels, scrollToModel]);
 
   const loadModels = async (forcedRouterType) => {
     setIsLoadingModels(true);
@@ -319,6 +389,109 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
     return (model.contextLength || 0) >= MIN_CHAIRMAN_CONTEXT;
   }, []);
 
+  const pickChairmanFromSelection = useCallback((ids) => {
+    if (!ids || ids.length === 0) return '';
+    const models = ids.map((id) => allModels.find((m) => m.id === id)).filter(Boolean);
+    const eligible = models.filter((m) => canBeChairman(m));
+    if (eligible.length > 0) {
+      eligible.sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0));
+      return eligible[0].id;
+    }
+    return models[0]?.id || '';
+  }, [allModels, canBeChairman]);
+
+  const adjustSelectionToSize = useCallback((targetSize) => {
+    const size = Math.min(maxModels, Math.max(MIN_MODELS, Number(targetSize) || MIN_MODELS));
+    setActivePreset(null);
+
+    const current = selectedModels.filter((id) => allModels.some((m) => m.id === id));
+    let next = [...current];
+
+    // Ensure we have a chairman (prefer current one if still valid).
+    let nextChairman = chairmanModel && allModels.some((m) => m.id === chairmanModel)
+      ? chairmanModel
+      : pickChairmanFromSelection(next);
+
+    // Trim down if needed, but keep chairman if possible.
+    if (next.length > size) {
+      if (nextChairman && next.includes(nextChairman)) {
+        const withoutChair = next.filter((id) => id !== nextChairman);
+        next = [nextChairman, ...withoutChair.slice(0, Math.max(0, size - 1))];
+      } else {
+        next = next.slice(0, size);
+      }
+    }
+
+    // Fill up if needed, using filteredModels (respects current filters/sort).
+    if (next.length < size) {
+      const candidates = filteredModels.map((m) => m.id);
+      for (const id of candidates) {
+        if (next.length >= size) break;
+        if (!next.includes(id)) next.push(id);
+      }
+    }
+
+    // Final chairman selection & ensure chairman is in the selection.
+    nextChairman = nextChairman || pickChairmanFromSelection(next);
+    if (nextChairman && !next.includes(nextChairman)) {
+      if (next.length < size) {
+        next.push(nextChairman);
+      } else if (next.length > 0) {
+        next[next.length - 1] = nextChairman;
+      } else {
+        next = [nextChairman];
+      }
+    }
+
+    // If chairman is still not eligible, try to swap in an eligible one.
+    const chairmanObj = allModels.find((m) => m.id === nextChairman);
+    if (chairmanObj && !canBeChairman(chairmanObj)) {
+      const eligible = next
+        .map((id) => allModels.find((m) => m.id === id))
+        .filter((m) => m && canBeChairman(m))
+        .sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0));
+      if (eligible.length > 0) {
+        nextChairman = eligible[0].id;
+      }
+    }
+
+    setSelectedModels(next.slice(0, size));
+    setChairmanModel(nextChairman);
+    setCouncilSize(size);
+  }, [allModels, canBeChairman, chairmanModel, filteredModels, maxModels, pickChairmanFromSelection, selectedModels]);
+
+  const luckyPick = useCallback(() => {
+    setActivePreset(null);
+    const size = Math.min(maxModels, Math.max(MIN_MODELS, councilSize || MIN_MODELS));
+
+    const candidates = (filteredModels.length >= size ? filteredModels : allModels).map((m) => m.id);
+    if (candidates.length < size) return;
+
+    // Fisher-Yates shuffle (copy).
+    const pool = [...candidates];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+
+    let next = pool.slice(0, size);
+    let nextChairman = pickChairmanFromSelection(next);
+    if (!nextChairman) {
+      // Try to find any eligible chairman in allModels and add/replace.
+      const eligible = allModels.filter((m) => canBeChairman(m)).sort((a, b) => (b.contextLength || 0) - (a.contextLength || 0));
+      const best = eligible[0]?.id;
+      if (best) {
+        nextChairman = best;
+        if (!next.includes(best)) {
+          next[next.length - 1] = best;
+        }
+      }
+    }
+
+    setSelectedModels(next);
+    setChairmanModel(nextChairman);
+  }, [allModels, canBeChairman, councilSize, filteredModels, maxModels, pickChairmanFromSelection]);
+
   const handleChairmanChange = (modelId, event) => {
     if (event) {
       event.stopPropagation();
@@ -377,6 +550,60 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
     await loadModels(nextType);
   };
 
+  const handleSavePreset = () => {
+    const name = (newPresetName || '').trim();
+    if (!name) {
+      setLoadError('Preset name is required.');
+      return;
+    }
+    if (selectedModels.length < MIN_MODELS || !chairmanModel) {
+      setLoadError(`Select at least ${MIN_MODELS} models and a Chairman before saving a preset.`);
+      return;
+    }
+
+    const preset = {
+      id: generatePresetId(),
+      name,
+      routerType,
+      executionMode,
+      councilSize,
+      models: selectedModels,
+      chairman: chairmanModel,
+      createdAt: Date.now(),
+    };
+
+    const next = [preset, ...savedPresets].slice(0, 50);
+    setSavedPresets(next);
+    saveSavedPresets(next);
+    setSelectedPresetId(preset.id);
+    setNewPresetName('');
+    setActivePreset(`saved:${preset.id}`);
+  };
+
+  const handleLoadPreset = async () => {
+    const preset = savedPresets.find((p) => p.id === selectedPresetId);
+    if (!preset) return;
+
+    if (preset.routerType && preset.routerType !== routerType) {
+      setPendingPreset(preset);
+      await handleRouterTypeChange(preset.routerType);
+      return;
+    }
+
+    setPendingPreset(preset);
+  };
+
+  const handleDeletePreset = () => {
+    const preset = savedPresets.find((p) => p.id === selectedPresetId);
+    if (!preset) return;
+    if (!window.confirm(`Delete preset "${preset.name}"?`)) return;
+
+    const next = savedPresets.filter((p) => p.id !== selectedPresetId);
+    setSavedPresets(next);
+    saveSavedPresets(next);
+    setSelectedPresetId('');
+  };
+
   const isValid = selectedModels.length >= MIN_MODELS && chairmanModel;
   const isMaxReached = selectedModels.length >= maxModels;
   const hasLastUsed = (() => {
@@ -426,6 +653,66 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
                 <span className="preset-description">{preset.description}</span>
               </button>
             ))}
+          </div>
+
+          {/* Saved presets */}
+          <div style={{ marginTop: '14px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <select
+              className="filter-select"
+              value={selectedPresetId}
+              onChange={(e) => setSelectedPresetId(e.target.value)}
+              style={{ minWidth: '240px' }}
+            >
+              <option value="">Saved presets…</option>
+              {savedPresets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="preset-button"
+              style={{ padding: '10px 12px', flexDirection: 'row', alignItems: 'center', gap: '8px' }}
+              onClick={handleLoadPreset}
+              disabled={!selectedPresetId || isLoadingModels}
+              type="button"
+            >
+              Load
+            </button>
+            <button
+              className="preset-button"
+              style={{ padding: '10px 12px', flexDirection: 'row', alignItems: 'center', gap: '8px' }}
+              onClick={handleDeletePreset}
+              disabled={!selectedPresetId}
+              type="button"
+            >
+              Delete
+            </button>
+          </div>
+
+          <div style={{ marginTop: '10px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              value={newPresetName}
+              onChange={(e) => setNewPresetName(e.target.value)}
+              placeholder="Preset name…"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#fff',
+                padding: '10px 12px',
+                borderRadius: '10px',
+                minWidth: '240px'
+              }}
+            />
+            <button
+              className="preset-button"
+              style={{ padding: '10px 12px', flexDirection: 'row', alignItems: 'center', gap: '8px' }}
+              onClick={handleSavePreset}
+              disabled={isLoadingModels}
+              type="button"
+            >
+              Save current
+            </button>
           </div>
         </div>
 
@@ -536,6 +823,35 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
             <div style={{ opacity: 0.8, fontSize: '13px', lineHeight: 1.4 }}>
               Select the provider for this conversation. No fallback.
             </div>
+          </div>
+        </div>
+
+        {/* Council Size */}
+        <div className="selected-models-section" style={{ paddingTop: 0 }}>
+          <h3>Council Size</h3>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="range"
+              min={MIN_MODELS}
+              max={maxModels}
+              step="1"
+              value={Math.min(maxModels, Math.max(MIN_MODELS, councilSize || MIN_MODELS))}
+              onChange={(e) => adjustSelectionToSize(Number(e.target.value))}
+              style={{ minWidth: '240px' }}
+            />
+            <div style={{ opacity: 0.9, fontSize: '13px' }}>
+              {selectedModels.length} selected (target {councilSize}, min {MIN_MODELS}, max {maxModels})
+            </div>
+            <button
+              className="preset-button"
+              style={{ padding: '10px 12px', flexDirection: 'row', alignItems: 'center', gap: '8px' }}
+              onClick={luckyPick}
+              disabled={isLoadingModels}
+              type="button"
+              title="Randomize council composition"
+            >
+              I’m Feeling Lucky
+            </button>
           </div>
         </div>
 

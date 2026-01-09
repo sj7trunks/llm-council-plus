@@ -1045,6 +1045,8 @@ async def send_message_stream(
         aggregate_rankings = []
         message_saved = False  # Track if message was saved in normal flow
         title_task = None
+        stage2_task = None
+        stage3_task = None
 
         try:
             # Reset token stats for this request
@@ -1269,6 +1271,12 @@ async def send_message_stream(
             logger.error("[STREAMING] BaseException during streaming for conversation %s: %s: %s", conversation_id, type(e).__name__, str(e))
             raise
         finally:
+            # Best-effort: cancel any in-flight tasks on disconnect/abort.
+            # (We don't await here because the generator is often already cancelled.)
+            for task in (title_task, stage2_task, stage3_task):
+                if task is not None and not task.done():
+                    task.cancel()
+
             # CRITICAL FIX: Save partial results if client disconnected before completion
             # This ensures we don't lose work when client closes connection mid-stream
             if not message_saved and stage1_results:

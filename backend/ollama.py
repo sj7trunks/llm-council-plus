@@ -129,12 +129,19 @@ async def query_models_streaming(
     tasks = [asyncio.create_task(query_with_name(model)) for model in models]
     logger.debug("[PARALLEL] All %d tasks created and running in parallel", len(tasks))
 
-    # Yield results as they complete (first finished = first yielded)
-    for coro in asyncio.as_completed(tasks):
-        model, response = await coro
-        yield_time = time.time() - start_time
-        logger.debug("[PARALLEL] Yielding %s at t=%.2fs", model, yield_time)
-        yield (model, response)
+    try:
+        # Yield results as they complete (first finished = first yielded)
+        for coro in asyncio.as_completed(tasks):
+            model, response = await coro
+            yield_time = time.time() - start_time
+            logger.debug("[PARALLEL] Yielding %s at t=%.2fs", model, yield_time)
+            yield (model, response)
+    finally:
+        # If the consumer disconnects/cancels mid-stream, ensure we don't leak background tasks.
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def query_models_with_stage_timeout(

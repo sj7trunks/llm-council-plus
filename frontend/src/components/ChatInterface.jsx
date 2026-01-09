@@ -64,6 +64,7 @@ function RealtimeTimer({ startTime }) {
 export default function ChatInterface({
   conversation,
   onSendMessage,
+  onAbort,
   onUploadFile,
   isLoading,
   webSearchAvailable = false,
@@ -463,6 +464,16 @@ export default function ChatInterface({
             >
               {conversation.messages.length === 0 ? 'Send' : 'Follow-up'}
             </button>
+            {onAbort && isLoading && (
+              <button
+                type="button"
+                className="stop-button"
+                onClick={onAbort}
+                title="Stop / cancel this request"
+              >
+                Stop
+              </button>
+            )}
           </div>
         </form>
     </div>
