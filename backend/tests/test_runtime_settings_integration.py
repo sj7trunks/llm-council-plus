@@ -13,7 +13,7 @@ async def test_stage2_uses_runtime_prompt_template_and_temperature(monkeypatch):
 
     captured = {}
 
-    async def fake_query_models_with_stage_timeout(models, messages, **kwargs):
+    async def fake_query_models_with_stage_timeout(router_type, models, messages, **kwargs):
         # Capture the fully rendered prompt and the temperature passed down.
         captured["prompt"] = messages[0]["content"]
         captured["temperature"] = kwargs.get("temperature")
@@ -27,7 +27,7 @@ async def test_stage2_uses_runtime_prompt_template_and_temperature(monkeypatch):
         ),
     )
 
-    with patch("backend.council.query_models_with_stage_timeout", side_effect=fake_query_models_with_stage_timeout):
+    with patch("backend.router_dispatch.query_models_with_stage_timeout", side_effect=fake_query_models_with_stage_timeout):
         stage2_results, label_to_model = await stage2_collect_rankings(
             "What is Python?",
             [{"model": "m1", "response": "Python is great."}],
@@ -48,7 +48,7 @@ async def test_stage1_applies_runtime_stage1_prompt_template(monkeypatch):
 
     seen = {"messages": None}
 
-    async def fake_query_models_streaming(models, messages, **kwargs):
+    async def fake_query_models_streaming(router_type, models, messages, **kwargs):
         seen["messages"] = messages
         if False:
             yield  # pragma: no cover
@@ -58,7 +58,7 @@ async def test_stage1_applies_runtime_stage1_prompt_template(monkeypatch):
         lambda: RuntimeSettings(stage1_prompt_template="PREFIX\n\n{full_query}"),
     )
 
-    with patch("backend.council.query_models_streaming", side_effect=fake_query_models_streaming):
+    with patch("backend.router_dispatch.query_models_streaming", side_effect=fake_query_models_streaming):
         gen = stage1_collect_responses_streaming("Hello", conversation_history=None, models=["m1"])
         # Exhaust generator
         async for _ in gen:
@@ -68,4 +68,3 @@ async def test_stage1_applies_runtime_stage1_prompt_template(monkeypatch):
     # Stage 1 base behavior is user message only; template should wrap it.
     user_msg = next(m for m in seen["messages"] if m["role"] == "user")
     assert "PREFIX" in user_msg["content"] if isinstance(user_msg["content"], str) else user_msg["content"][0]["text"]
-
