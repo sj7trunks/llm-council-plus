@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Generator
 from pathlib import Path
-from .config import DATA_DIR, DATABASE_TYPE
+from .config import DATA_DIR, DATABASE_TYPE, ROUTER_TYPE
 from .database import is_using_database, SessionLocal
 from .models import Conversation as ConversationModel
 
@@ -137,6 +137,7 @@ def _json_create_conversation(
     chairman: Optional[str] = None,
     username: Optional[str] = None,
     execution_mode: Optional[str] = None,
+    router_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create conversation in JSON file with exclusive lock."""
     ensure_data_dir()
@@ -150,6 +151,7 @@ def _json_create_conversation(
         "chairman": chairman,
         "username": username,
         "execution_mode": execution_mode,
+        "router_type": router_type,
     }
 
     path = get_conversation_path(conversation_id)
@@ -238,11 +240,12 @@ def _db_create_conversation(
     chairman: Optional[str] = None,
     username: Optional[str] = None,
     execution_mode: Optional[str] = None,
+    router_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create conversation in database."""
     models_payload: Any = models
-    if execution_mode is not None:
-        models_payload = {"models": models, "execution_mode": execution_mode}
+    if execution_mode is not None or router_type is not None:
+        models_payload = {"models": models, "execution_mode": execution_mode, "router_type": router_type}
 
     db = SessionLocal()
     try:
@@ -290,10 +293,11 @@ def _db_save_conversation(conversation: Dict[str, Any]):
             db_conversation.title = conversation.get('title', 'New Conversation')
             db_conversation.messages = conversation.get('messages', [])
             models_value: Any = conversation.get('models')
-            if conversation.get("execution_mode") is not None:
+            if conversation.get("execution_mode") is not None or conversation.get("router_type") is not None:
                 models_value = {
                     "models": models_value,
                     "execution_mode": conversation.get("execution_mode"),
+                    "router_type": conversation.get("router_type"),
                 }
             db_conversation.models = models_value
             db_conversation.chairman = conversation.get('chairman')
@@ -361,6 +365,7 @@ def create_conversation(
     chairman: Optional[str] = None,
     username: Optional[str] = None,
     execution_mode: Optional[str] = None,
+    router_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation.
@@ -375,9 +380,9 @@ def create_conversation(
         New conversation dict
     """
     if is_using_database():
-        conv = _db_create_conversation(conversation_id, models, chairman, username, execution_mode)
+        conv = _db_create_conversation(conversation_id, models, chairman, username, execution_mode, router_type)
     else:
-        conv = _json_create_conversation(conversation_id, models, chairman, username, execution_mode)
+        conv = _json_create_conversation(conversation_id, models, chairman, username, execution_mode, router_type)
 
     return _normalize_conversation(conv)
 
@@ -413,13 +418,22 @@ def save_conversation(conversation: Dict[str, Any]):
         _json_save_conversation(conversation)
 
 
+def _infer_router_type_from_models(models: Optional[List[str]]) -> Optional[str]:
+    if not models:
+        return None
+    for model_id in models:
+        if isinstance(model_id, str) and "/" in model_id:
+            return "openrouter"
+    return "ollama"
+
+
 def _normalize_conversation(conversation: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Normalize conversation shape for backwards compatibility.
 
     Supports:
     - Legacy DB format where `models` is a list
-    - New DB format where `models` is a dict: {"models": [...], "execution_mode": "..."}
+    - New DB format where `models` is a dict: {"models": [...], "execution_mode": "...", "router_type": "..."}
     - JSON format with top-level `execution_mode`
     """
     if not conversation:
@@ -430,7 +444,14 @@ def _normalize_conversation(conversation: Optional[Dict[str, Any]]) -> Optional[
         # Extract embedded settings without changing DB schema.
         conversation = conversation.copy()
         conversation["execution_mode"] = conversation.get("execution_mode") or models.get("execution_mode")
+        conversation["router_type"] = conversation.get("router_type") or models.get("router_type")
         conversation["models"] = models.get("models")
+
+    # Backwards compatibility: infer router_type if missing.
+    if not conversation.get("router_type"):
+        inferred = _infer_router_type_from_models(conversation.get("models"))
+        conversation = conversation.copy()
+        conversation["router_type"] = inferred or ROUTER_TYPE
 
     return conversation
 
