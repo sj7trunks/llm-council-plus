@@ -25,7 +25,7 @@ This fork extends [Andrej Karpathy's llm-council](https://github.com/karpathy/ll
 | **Authentication** | ❌ | ✅ JWT multi-user system |
 | **Storage** | JSON files only | JSON, PostgreSQL, MySQL |
 | **Token Optimization** | ❌ | ✅ TOON format (20-60% savings) |
-| **Web Search** | ❌ | ✅ Tavily + Exa AI integration |
+| **Web Search** | ❌ | ✅ DuckDuckGo + Tavily + Exa + Brave |
 | **File Attachments** | ❌ | ✅ PDF, TXT, MD, images |
 | **Tools** | ❌ | ✅ Calculator, Wikipedia, ArXiv, Yahoo Finance |
 | **Real-time Streaming** | Basic | SSE with heartbeats & state persistence |
@@ -33,6 +33,19 @@ This fork extends [Andrej Karpathy's llm-council](https://github.com/karpathy/ll
 | **Hot Reload** | ❌ | ✅ Config changes without restart |
 | **Conversation Search** | ❌ | ✅ Filter by title with relative dates |
 | **Stage Timeouts** | ❌ | ✅ 90s stage-level timeout (first-N-complete) |
+
+### Recent Updates (v1.3.1)
+
+| New Feature | What it adds | Where |
+|---|---|---|
+| **Per-conversation router** | Choose **OpenRouter** or **Ollama** per conversation (no fallback) | Model Selector → Router |
+| **Model presets + council sizing** | Built-in presets + saved presets, configurable council size, “I’m Feeling Lucky” | Model Selector |
+| **Runtime Settings panel** | Edit prompts + temperatures; **persist / reset / export / import** (no secrets) | Settings → Prompts/Temps/Backup |
+| **Stop / Abort streaming** | Cancel an in-flight request cleanly (frontend abort + backend task cancel) | Composer “Stop” |
+| **Web search provider selection** | DuckDuckGo (free) + Tavily + Exa + Brave, per-message selection | Composer search pill |
+| **Full-article fetch (optional)** | Fetch top-N pages via Jina Reader for richer context (DDG/Brave) | Settings → Web Search |
+| **Search context panel** | Compact view (title + domain) + expandable content per result | Assistant message UI |
+| **UI polish pass** | Dark dropdown menus, cleaner sidebar actions, compact composer layout | App UI |
 
 ### Recent Updates (v1.3.0)
 
@@ -152,11 +165,13 @@ OLLAMA_HOST=host.docker.internal:11434
 
 ## Web Search (Optional)
 
-The UI can run web search and inject results into Stage 1 as context:
-- **Heuristic tool usage**: search tools run only when the prompt has explicit search intent.
-- **Web Search toggle**: forces a web search; the Chairman optimizes the query and runs Tavily/Exa.
+The UI can run web search and inject results into Stage 1 as context. You can select the provider per message (search pill) or set a default in Settings.
 
-Enable one of:
+Providers:
+- **DuckDuckGo (free)**: enabled by default, no API key required
+- **Tavily / Exa / Brave**: require API keys (optional)
+
+Enable any of the optional providers:
 ```bash
 ENABLE_TAVILY=true
 TAVILY_API_KEY=tvly-...
@@ -166,6 +181,12 @@ or:
 ```bash
 ENABLE_EXA=true
 EXA_API_KEY=...
+```
+
+or:
+```bash
+ENABLE_BRAVE=true
+BRAVE_API_KEY=...
 ```
 
 ## Storage

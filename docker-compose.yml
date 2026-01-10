@@ -31,8 +31,11 @@ services:
       # Tavily search (advanced web search)
       - ENABLE_TAVILY=${ENABLE_TAVILY:-false}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
+      # Brave search (optional)
+      - ENABLE_BRAVE=${ENABLE_BRAVE:-false}
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
     volumes:
-      - ./data/conversations:/app/data/conversations
+      - ./data:/app/data
       - ./credentials:/app/credentials:ro
       - ./.env:/app/.env
     restart: unless-stopped

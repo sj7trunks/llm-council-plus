@@ -170,27 +170,26 @@ export default function Sidebar({
           </svg>
           <span className="sidebar-title-text">LLM Council Plus</span>
         </div>
-        <button className="new-conversation-btn" onClick={onNewConversation}>
-          + New Conversation
-        </button>
-        {onOpenSettings && (
-          <button
-            className="settings-btn"
-            onClick={onOpenSettings}
-            title="Edit prompts and temperatures"
-          >
-            Settings
+
+        <div className="sidebar-actions">
+          <button className="new-conversation-btn" onClick={onNewConversation}>
+            + New Conversation
           </button>
-        )}
-        {conversations.length > 0 && (
-          <button
-            className="delete-all-btn"
-            onClick={handleDeleteAllClick}
-            title="Delete all conversations"
-          >
-            Delete All
-          </button>
-        )}
+
+          <div className="sidebar-actions-row">
+            {onOpenSettings && (
+              <button
+                className="sidebar-action-btn sidebar-action-btn--secondary"
+                onClick={onOpenSettings}
+                title="Edit prompts and temperatures"
+                type="button"
+              >
+                <span className="sidebar-action-btn__icon" aria-hidden="true">⚙︎</span>
+                <span>Settings</span>
+              </button>
+            )}
+          </div>
+        </div>
 
         {/* Search input */}
         <div className="search-container">
@@ -335,7 +334,21 @@ export default function Sidebar({
             </button>
           </div>
         )}
-        {version && <span className="version-badge">v{version}</span>}
+
+        <div className="sidebar-footer-row">
+          {version && <span className="version-badge">v{version}</span>}
+          {conversations.length > 0 && (
+            <button
+              className="sidebar-action-btn sidebar-action-btn--danger sidebar-action-btn--compact"
+              onClick={handleDeleteAllClick}
+              title="Delete all conversations"
+              type="button"
+            >
+              <span className="sidebar-action-btn__icon" aria-hidden="true">🗑</span>
+              <span>Delete All</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

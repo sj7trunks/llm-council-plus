@@ -32,6 +32,37 @@
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   animation: slideUp 0.3s ease-out;
+  color-scheme: dark;
+}
+
+.model-selector-modal select {
+  color-scheme: dark;
+}
+
+.model-selector-modal select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.model-selector-select {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  padding: 10px 12px;
+  border-radius: 10px;
+  min-width: 240px;
+  cursor: pointer;
+  outline: none;
+  color-scheme: dark;
+}
+
+.model-selector-select:hover {
+  border-color: rgba(74, 144, 226, 0.6);
+}
+
+.model-selector-select:focus {
+  border-color: rgba(74, 144, 226, 0.6);
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.22);
 }
 
 @keyframes slideUp {

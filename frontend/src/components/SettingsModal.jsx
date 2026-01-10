@@ -296,15 +296,7 @@ export default function SettingsModal({ isOpen, onClose }) {
                 <select
                   value={draft.web_search_provider || 'duckduckgo'}
                   onChange={(e) => setDraft((p) => ({ ...p, web_search_provider: e.target.value }))}
-                  style={{
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    color: '#fff',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    width: '100%',
-                    maxWidth: '420px',
-                  }}
+                  className="settings-select"
                 >
                   <option value="off">Off</option>
                   <option value="duckduckgo">DuckDuckGo (free)</option>

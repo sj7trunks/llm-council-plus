@@ -109,6 +109,14 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
   const modelsGridRef = useRef(null);
   const modelCardRefs = useRef({});
 
+  // Scroll to a specific model card
+  const scrollToModel = useCallback((modelId) => {
+    const cardElement = modelCardRefs.current[modelId];
+    if (cardElement && modelsGridRef.current) {
+      cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, []);
+
   // Load models when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -230,14 +238,6 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
       console.error('Failed to save last selection:', e);
     }
   };
-
-  // Scroll to a specific model card
-  const scrollToModel = useCallback((modelId) => {
-    const cardElement = modelCardRefs.current[modelId];
-    if (cardElement && modelsGridRef.current) {
-      cardElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, []);
 
   // Extract unique providers from models
   const providers = useMemo(() => {
@@ -782,14 +782,7 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
             <select
               value={executionMode}
               onChange={(e) => setExecutionMode(e.target.value)}
-              style={{
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                color: '#fff',
-                padding: '10px 12px',
-                borderRadius: '10px',
-                minWidth: '240px'
-              }}
+              className="model-selector-select"
             >
               <option value="full">Full (Stage 1 + 2 + 3)</option>
               <option value="chat_ranking">Chat + Ranking (Stage 1 + 2)</option>
@@ -808,14 +801,7 @@ export default function ModelSelector({ isOpen, onClose, onConfirm }) {
             <select
               value={routerType}
               onChange={(e) => handleRouterTypeChange(e.target.value)}
-              style={{
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                color: '#fff',
-                padding: '10px 12px',
-                borderRadius: '10px',
-                minWidth: '240px'
-              }}
+              className="model-selector-select"
             >
               <option value="openrouter">OpenRouter</option>
               <option value="ollama">Ollama (Local)</option>

@@ -19,6 +19,7 @@
   backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
+  color-scheme: dark;
 }
 
 .settings-modal-header {
@@ -113,6 +114,28 @@
   width: 100%;
 }
 
+.settings-select {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  padding: 10px 12px;
+  border-radius: 10px;
+  width: 100%;
+  max-width: 420px;
+  color-scheme: dark;
+}
+
+.settings-select:focus {
+  outline: none;
+  border-color: rgba(74, 144, 226, 0.6);
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.25);
+}
+
+.settings-select option {
+  background: rgb(25, 25, 35);
+  color: rgba(255, 255, 255, 0.95);
+}
+
 .settings-value {
   opacity: 0.9;
   font-weight: 700;
@@ -185,4 +208,3 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
-
