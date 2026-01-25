@@ -56,16 +56,39 @@ async def query_model(
 
     except httpx.ConnectError as e:
         logger.error("Connection error querying model %s: Cannot connect to Ollama at %s. Is Ollama running? Error: %s", model, OLLAMA_HOST, e)
-        return None
+        return {
+            'error': True,
+            'error_type': 'connection',
+            'error_message': f'Cannot connect to Ollama at {OLLAMA_HOST}. Is Ollama running?'
+        }
     except httpx.HTTPStatusError as e:
         logger.error("HTTP error querying model %s: Status %s. Response: %s", model, e.response.status_code, e.response.text)
-        return None
+        error_msg = f"HTTP {e.response.status_code}"
+        if e.response.status_code == 404:
+            return {
+                'error': True,
+                'error_type': 'not_found',
+                'error_message': f'Model {model} not found. Try: ollama pull {model}'
+            }
+        return {
+            'error': True,
+            'error_type': 'http',
+            'error_message': error_msg
+        }
     except httpx.TimeoutException as e:
         logger.error("Timeout error querying model %s: Request took longer than %ss. Error: %s", model, timeout, e)
-        return None
+        return {
+            'error': True,
+            'error_type': 'timeout',
+            'error_message': f'Request timed out after {timeout}s'
+        }
     except Exception as e:
         logger.error("Unexpected error querying model %s: %s: %s", model, type(e).__name__, e)
-        return None
+        return {
+            'error': True,
+            'error_type': 'unknown',
+            'error_message': str(e)
+        }
 
 
 async def query_models_parallel(
