@@ -2,10 +2,13 @@
 
 import logging
 import httpx
-from typing import List, Dict, Any, Union, TypedDict
+from typing import List, Dict, Any, Union, TypedDict, Literal
 from .config import OLLAMA_HOST, DEFAULT_TIMEOUT
 
 logger = logging.getLogger(__name__)
+
+# Error type literals for better type checking
+ErrorType = Literal['connection', 'not_found', 'http', 'timeout', 'unknown', 'stage_timeout']
 
 
 class SuccessResponse(TypedDict, total=False):
@@ -17,7 +20,7 @@ class SuccessResponse(TypedDict, total=False):
 class ErrorResponse(TypedDict):
     """Error response matching OpenRouter format."""
     error: bool  # Always True
-    error_type: str  # 'connection', 'not_found', 'http', 'timeout', 'unknown'
+    error_type: ErrorType
     error_message: str
 
 
@@ -116,16 +119,17 @@ async def query_models_parallel(
     models: List[str],
     messages: List[Dict[str, str]],
     temperature: float | None = None,
-) -> Dict[str, Optional[Dict[str, Any]]]:
+) -> Dict[str, QueryResponse]:
     """
     Query multiple models in parallel.
 
     Args:
         models: List of Ollama model identifiers
         messages: List of message dicts to send to each model
+        temperature: Optional temperature for response generation
 
     Returns:
-        Dict mapping model identifier to response dict (or None if failed)
+        Dict mapping model identifier to QueryResponse (success or error dict)
     """
     import asyncio
 
@@ -195,7 +199,7 @@ async def query_models_with_stage_timeout(
     stage_timeout: float = 90.0,
     min_results: int = 3,
     temperature: float | None = None,
-) -> Dict[str, Optional[Dict[str, Any]]]:
+) -> Dict[str, QueryResponse]:
     """
     Query multiple models in parallel with overall stage timeout.
 
@@ -210,9 +214,10 @@ async def query_models_with_stage_timeout(
         stage: Optional stage identifier for debugging
         stage_timeout: Maximum time to wait for this stage (seconds)
         min_results: Minimum number of results to wait for before timeout applies
+        temperature: Optional temperature for response generation
 
     Returns:
-        Dict mapping model identifier to response dict
+        Dict mapping model identifier to QueryResponse (success or error dict)
     """
     import asyncio
     import time
