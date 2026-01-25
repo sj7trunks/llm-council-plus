@@ -1286,10 +1286,15 @@ async def send_message_stream(
             raise
         finally:
             # Best-effort: cancel any in-flight tasks on disconnect/abort.
-            # (We don't await here because the generator is often already cancelled.)
-            for task in (title_task, stage2_task, stage3_task):
-                if task is not None and not task.done():
-                    task.cancel()
+            tasks_to_cleanup = [t for t in (title_task, stage2_task, stage3_task) if t is not None and not t.done()]
+            for task in tasks_to_cleanup:
+                task.cancel()
+            # Await cancelled tasks to prevent "task was destroyed but pending" warnings
+            if tasks_to_cleanup:
+                try:
+                    await asyncio.gather(*tasks_to_cleanup, return_exceptions=True)
+                except Exception:
+                    pass  # Ignore cleanup errors
 
             # CRITICAL FIX: Save partial results if client disconnected before completion
             # This ensures we don't lose work when client closes connection mid-stream
