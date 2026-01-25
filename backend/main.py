@@ -1000,12 +1000,16 @@ async def send_message(
     # For temporary mode, skip conversation existence check and storage operations
     if request.temporary:
         # Run the 3-stage council process without saving
-        stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-            full_query,
-            conversation_history=None,
-            images=image_attachments if image_attachments else None,
-            conversation_id=None  # No conversation_id for temporary chat
-        )
+        try:
+            stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+                full_query,
+                conversation_history=None,
+                images=image_attachments if image_attachments else None,
+                conversation_id=None  # No conversation_id for temporary chat
+            )
+        except ValueError as e:
+            # Translate configuration errors (e.g., no council models) to 400
+            raise HTTPException(status_code=400, detail=str(e))
 
         return {
             "stage1": stage1_results,
@@ -1037,12 +1041,16 @@ async def send_message(
 
     # Run the 3-stage council process with full query including attachments
     images_for_council = image_attachments if image_attachments else None
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        full_query,
-        conversation_history,
-        images=images_for_council,
-        conversation_id=conversation_id  # For memory system
-    )
+    try:
+        stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+            full_query,
+            conversation_history,
+            images=images_for_council,
+            conversation_id=conversation_id  # For memory system
+        )
+    except ValueError as e:
+        # Translate configuration errors (e.g., no council models) to 400
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Add assistant message with all stages and metadata
     storage.add_assistant_message(
@@ -1136,25 +1144,30 @@ async def send_message_stream(
                 or ("tavily" if getattr(request, "web_search", False) else None)
             )
 
-            async for item in stage1_collect_responses_streaming(
-                full_query,
-                conversation_history,
-                conv_models,
-                images_for_council,
-                conversation_id,
-                web_search_provider=web_search_provider,
-                chairman=conv_chairman,
-                router_type=router_type,
-            ):
-                # Handle tool_outputs message (first yield if tools were used)
-                if item.get("type") == "tool_outputs":
-                    tool_outputs = item.get("tool_outputs", [])
-                    yield f"data: {json.dumps({'type': 'tool_outputs', 'data': tool_outputs, 'timestamp': time.time()})}\n\n"
-                else:
-                    # Send individual model response event
-                    model_time = time.time()
-                    yield f"data: {json.dumps({'type': 'stage1_model_response', 'data': item, 'timestamp': model_time})}\n\n"
-                    stage1_results.append(item)
+            try:
+                async for item in stage1_collect_responses_streaming(
+                    full_query,
+                    conversation_history,
+                    conv_models,
+                    images_for_council,
+                    conversation_id,
+                    web_search_provider=web_search_provider,
+                    chairman=conv_chairman,
+                    router_type=router_type,
+                ):
+                    # Handle tool_outputs message (first yield if tools were used)
+                    if item.get("type") == "tool_outputs":
+                        tool_outputs = item.get("tool_outputs", [])
+                        yield f"data: {json.dumps({'type': 'tool_outputs', 'data': tool_outputs, 'timestamp': time.time()})}\n\n"
+                    else:
+                        # Send individual model response event
+                        model_time = time.time()
+                        yield f"data: {json.dumps({'type': 'stage1_model_response', 'data': item, 'timestamp': model_time})}\n\n"
+                        stage1_results.append(item)
+            except ValueError as e:
+                # Configuration errors (e.g., no council models) - send error event and stop
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                return
 
             stage1_end_time = time.time()
             stage1_duration = stage1_end_time - stage1_start_time
