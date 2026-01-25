@@ -344,21 +344,37 @@ async def generate_secret(type: str = "jwt"):
 async def save_setup_config(request: SetupConfigRequest):
     """
     Save configuration to .env file.
-    This endpoint is only available when setup is required.
+    This endpoint is only available when setup is required (first run).
+    After initial setup, this endpoint is disabled for security.
     """
     from .config import ROUTER_TYPE, OPENROUTER_API_KEY
     import os
     from pathlib import Path
 
-    # Only allow setup when not configured
+    # Find .env file location
+    env_path = Path(__file__).parent.parent / ".env"
+
+    # Security check: Only allow setup when not yet configured
+    # Check for SETUP_COMPLETE flag or existing valid configuration
     if ROUTER_TYPE == "openrouter" and OPENROUTER_API_KEY:
         raise HTTPException(
             status_code=403,
             detail="Application is already configured. Edit .env file manually to change settings."
         )
 
-    # Find .env file location
-    env_path = Path(__file__).parent.parent / ".env"
+    # For Ollama: check if setup was already completed (SETUP_COMPLETE flag in .env)
+    if env_path.exists():
+        try:
+            env_content = env_path.read_text()
+            if "SETUP_COMPLETE=true" in env_content:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Application is already configured. Edit .env file manually to change settings."
+                )
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions (don't swallow security checks)
+        except OSError:
+            pass  # If we can't read file, proceed with setup
 
     # Build new config lines
     updates = {}
@@ -387,6 +403,25 @@ async def save_setup_config(request: SetupConfigRequest):
     if not updates:
         raise HTTPException(status_code=400, detail="No configuration provided")
 
+    # Keep raw values for os.environ (runtime), sanitize only for .env file
+    raw_updates = dict(updates)
+
+    # Sanitize values to prevent .env injection (newlines could inject new variables)
+    def sanitize_env_value(value: str) -> str:
+        """Remove/escape characters that could cause .env injection."""
+        if not isinstance(value, str):
+            return str(value)
+        # Remove newlines and carriage returns (could inject new variables)
+        sanitized = value.replace('\n', '').replace('\r', '')
+        # If value contains spaces, quotes, or # (comment char), quote it
+        if ' ' in sanitized or '"' in sanitized or "'" in sanitized or '#' in sanitized:
+            # Escape existing quotes and wrap in quotes
+            sanitized = '"' + sanitized.replace('"', '\\"') + '"'
+        return sanitized
+
+    # file_updates = sanitized values for .env file
+    file_updates = {k: sanitize_env_value(v) for k, v in updates.items()}
+
     # Read existing .env or create new
     existing_lines = []
     existing_keys = set()
@@ -396,23 +431,28 @@ async def save_setup_config(request: SetupConfigRequest):
                 stripped = line.strip()
                 if stripped and not stripped.startswith('#') and '=' in stripped:
                     key = stripped.split('=')[0]
-                    if key not in updates:
+                    if key not in file_updates:
                         existing_lines.append(line.rstrip())
                     existing_keys.add(key)
                 elif stripped:
                     existing_lines.append(line.rstrip())
 
-    # Add new/updated values
-    for key, value in updates.items():
+    # Add new/updated values (sanitized for file)
+    for key, value in file_updates.items():
         existing_lines.append(f"{key}={value}")
+
+    # Mark setup as complete (prevents re-running setup endpoint)
+    if "SETUP_COMPLETE" not in existing_keys:
+        existing_lines.append("SETUP_COMPLETE=true")
+        raw_updates["SETUP_COMPLETE"] = "true"
 
     # Write back
     with open(env_path, 'w') as f:
         f.write('\n'.join(existing_lines) + '\n')
 
-    # CRITICAL: Directly update os.environ to override Docker's env vars
+    # CRITICAL: Directly update os.environ with RAW values (not quoted/escaped)
     # load_dotenv(override=True) doesn't override vars set by Docker at container startup
-    for key, value in updates.items():
+    for key, value in raw_updates.items():
         os.environ[key] = value
 
     # Reload config and auth modules to pick up new values in memory
@@ -433,7 +473,16 @@ async def save_setup_config(request: SetupConfigRequest):
 # Cache for models per router_type (5 minute TTL)
 # Shape: { "openrouter": {"data": {...}, "timestamp": 123}, "ollama": {...} }
 _models_cache: Dict[str, Dict[str, Any]] = {}
+_models_cache_lock: Optional[asyncio.Lock] = None  # Initialized lazily for event-loop safety
 _MODELS_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_models_cache_lock() -> asyncio.Lock:
+    """Get or create the models cache lock (lazy init for event-loop safety)."""
+    global _models_cache_lock
+    if _models_cache_lock is None:
+        _models_cache_lock = asyncio.Lock()
+    return _models_cache_lock
 
 
 def _parse_price(price_str: str) -> float:
@@ -525,16 +574,15 @@ async def get_available_models(router_type: Optional[str] = None):
     """
     from .config import OPENROUTER_API_KEY, OLLAMA_HOST, MIN_CHAIRMAN_CONTEXT
 
-    global _models_cache
-
     effective_router_type = (router_type or ROUTER_TYPE or "openrouter").lower()
     if effective_router_type not in {"openrouter", "ollama"}:
         raise HTTPException(status_code=400, detail="Invalid router_type. Must be 'openrouter' or 'ollama'.")
 
-    # Check cache
-    cache_entry = _models_cache.get(effective_router_type)
-    if cache_entry and cache_entry.get("data") and (time.time() - cache_entry.get("timestamp", 0)) < _MODELS_CACHE_TTL:
-        return cache_entry["data"]
+    # Check cache with lock for thread safety
+    async with _get_models_cache_lock():
+        cache_entry = _models_cache.get(effective_router_type)
+        if cache_entry and cache_entry.get("data") and (time.time() - cache_entry.get("timestamp", 0)) < _MODELS_CACHE_TTL:
+            return cache_entry["data"]
 
     if effective_router_type == "ollama":
         # Fetch from Ollama local API
@@ -563,7 +611,8 @@ async def get_available_models(router_type: Optional[str] = None):
 
                 from .config import MAX_COUNCIL_MODELS
                 result = {"models": models, "router_type": "ollama", "max_models": MAX_COUNCIL_MODELS}
-                _models_cache[effective_router_type] = {"data": result, "timestamp": time.time()}
+                async with _get_models_cache_lock():
+                    _models_cache[effective_router_type] = {"data": result, "timestamp": time.time()}
                 return result
 
         except httpx.RequestError as e:
@@ -638,7 +687,8 @@ async def get_available_models(router_type: Optional[str] = None):
 
                 from .config import MAX_COUNCIL_MODELS
                 result = {"models": models, "router_type": "openrouter", "count": len(models), "max_models": MAX_COUNCIL_MODELS}
-                _models_cache[effective_router_type] = {"data": result, "timestamp": time.time()}
+                async with _get_models_cache_lock():
+                    _models_cache[effective_router_type] = {"data": result, "timestamp": time.time()}
                 return result
 
         except httpx.RequestError as e:
@@ -722,7 +772,8 @@ async def create_conversation(
     """Create a new conversation. Requires authentication."""
     # Validate chairman model context length if specified
     router_type = (getattr(request, "router_type", None) or ROUTER_TYPE or "openrouter").strip().lower()
-    cache_entry = _models_cache.get(router_type)
+    async with _get_models_cache_lock():
+        cache_entry = _models_cache.get(router_type)
     if request.chairman and cache_entry and cache_entry.get("data"):
         models = cache_entry["data"].get("models", [])
         chairman_model = next((m for m in models if m["id"] == request.chairman), None)
@@ -949,12 +1000,16 @@ async def send_message(
     # For temporary mode, skip conversation existence check and storage operations
     if request.temporary:
         # Run the 3-stage council process without saving
-        stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-            full_query,
-            conversation_history=None,
-            images=image_attachments if image_attachments else None,
-            conversation_id=None  # No conversation_id for temporary chat
-        )
+        try:
+            stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+                full_query,
+                conversation_history=None,
+                images=image_attachments if image_attachments else None,
+                conversation_id=None  # No conversation_id for temporary chat
+            )
+        except ValueError as e:
+            # Translate configuration errors (e.g., no council models) to 400
+            raise HTTPException(status_code=400, detail=str(e))
 
         return {
             "stage1": stage1_results,
@@ -986,12 +1041,16 @@ async def send_message(
 
     # Run the 3-stage council process with full query including attachments
     images_for_council = image_attachments if image_attachments else None
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        full_query,
-        conversation_history,
-        images=images_for_council,
-        conversation_id=conversation_id  # For memory system
-    )
+    try:
+        stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
+            full_query,
+            conversation_history,
+            images=images_for_council,
+            conversation_id=conversation_id  # For memory system
+        )
+    except ValueError as e:
+        # Translate configuration errors (e.g., no council models) to 400
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Add assistant message with all stages and metadata
     storage.add_assistant_message(
@@ -1085,25 +1144,30 @@ async def send_message_stream(
                 or ("tavily" if getattr(request, "web_search", False) else None)
             )
 
-            async for item in stage1_collect_responses_streaming(
-                full_query,
-                conversation_history,
-                conv_models,
-                images_for_council,
-                conversation_id,
-                web_search_provider=web_search_provider,
-                chairman=conv_chairman,
-                router_type=router_type,
-            ):
-                # Handle tool_outputs message (first yield if tools were used)
-                if item.get("type") == "tool_outputs":
-                    tool_outputs = item.get("tool_outputs", [])
-                    yield f"data: {json.dumps({'type': 'tool_outputs', 'data': tool_outputs, 'timestamp': time.time()})}\n\n"
-                else:
-                    # Send individual model response event
-                    model_time = time.time()
-                    yield f"data: {json.dumps({'type': 'stage1_model_response', 'data': item, 'timestamp': model_time})}\n\n"
-                    stage1_results.append(item)
+            try:
+                async for item in stage1_collect_responses_streaming(
+                    full_query,
+                    conversation_history,
+                    conv_models,
+                    images_for_council,
+                    conversation_id,
+                    web_search_provider=web_search_provider,
+                    chairman=conv_chairman,
+                    router_type=router_type,
+                ):
+                    # Handle tool_outputs message (first yield if tools were used)
+                    if item.get("type") == "tool_outputs":
+                        tool_outputs = item.get("tool_outputs", [])
+                        yield f"data: {json.dumps({'type': 'tool_outputs', 'data': tool_outputs, 'timestamp': time.time()})}\n\n"
+                    else:
+                        # Send individual model response event
+                        model_time = time.time()
+                        yield f"data: {json.dumps({'type': 'stage1_model_response', 'data': item, 'timestamp': model_time})}\n\n"
+                        stage1_results.append(item)
+            except ValueError as e:
+                # Configuration errors (e.g., no council models) - send error event and stop
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                return
 
             stage1_end_time = time.time()
             stage1_duration = stage1_end_time - stage1_start_time
@@ -1286,10 +1350,19 @@ async def send_message_stream(
             raise
         finally:
             # Best-effort: cancel any in-flight tasks on disconnect/abort.
-            # (We don't await here because the generator is often already cancelled.)
-            for task in (title_task, stage2_task, stage3_task):
-                if task is not None and not task.done():
-                    task.cancel()
+            tasks_to_cleanup = [t for t in (title_task, stage2_task, stage3_task) if t is not None and not t.done()]
+            for task in tasks_to_cleanup:
+                task.cancel()
+            # Await cancelled tasks to prevent "task was destroyed but pending" warnings
+            # Use shield to protect cleanup from cancellation, and handle CancelledError
+            # (which is a BaseException in Python 3.8+, not caught by except Exception)
+            if tasks_to_cleanup:
+                try:
+                    await asyncio.shield(asyncio.gather(*tasks_to_cleanup, return_exceptions=True))
+                except asyncio.CancelledError:
+                    pass  # Cleanup was interrupted by cancellation, tasks are already cancelled
+                except Exception:
+                    pass  # Ignore other cleanup errors
 
             # CRITICAL FIX: Save partial results if client disconnected before completion
             # This ensures we don't lose work when client closes connection mid-stream

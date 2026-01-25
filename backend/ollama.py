@@ -2,10 +2,30 @@
 
 import logging
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Union, TypedDict, Literal
 from .config import OLLAMA_HOST, DEFAULT_TIMEOUT
 
 logger = logging.getLogger(__name__)
+
+# Error type literals for better type checking
+ErrorType = Literal['connection', 'not_found', 'http', 'timeout', 'unknown', 'stage_timeout']
+
+
+class SuccessResponse(TypedDict, total=False):
+    """Successful response from Ollama."""
+    content: str
+    reasoning_details: Any
+
+
+class ErrorResponse(TypedDict):
+    """Error response matching OpenRouter format."""
+    error: bool  # Always True
+    error_type: ErrorType
+    error_message: str
+
+
+# Union type for query_model return
+QueryResponse = Union[SuccessResponse, ErrorResponse]
 
 
 async def query_model(
@@ -13,7 +33,7 @@ async def query_model(
     messages: List[Dict[str, str]],
     timeout: float = None,
     temperature: float | None = None,
-) -> Optional[Dict[str, Any]]:
+) -> QueryResponse:
     """
     Query a single model via Ollama API.
 
@@ -21,9 +41,13 @@ async def query_model(
         model: Ollama model identifier (e.g., "gemma3:latest")
         messages: List of message dicts with 'role' and 'content'
         timeout: Request timeout in seconds (defaults to DEFAULT_TIMEOUT from config)
+        temperature: Optional temperature for response generation
 
     Returns:
-        Response dict with 'content' and optional 'reasoning_details', or None if failed
+        On success: dict with 'content' (str) and optional 'reasoning_details'
+        On error: dict with 'error' (True), 'error_type', and 'error_message'
+
+        Error types: 'connection', 'not_found', 'http', 'timeout', 'unknown'
     """
     if timeout is None:
         timeout = DEFAULT_TIMEOUT
@@ -56,32 +80,56 @@ async def query_model(
 
     except httpx.ConnectError as e:
         logger.error("Connection error querying model %s: Cannot connect to Ollama at %s. Is Ollama running? Error: %s", model, OLLAMA_HOST, e)
-        return None
+        return {
+            'error': True,
+            'error_type': 'connection',
+            'error_message': f'Cannot connect to Ollama at {OLLAMA_HOST}. Is Ollama running?'
+        }
     except httpx.HTTPStatusError as e:
         logger.error("HTTP error querying model %s: Status %s. Response: %s", model, e.response.status_code, e.response.text)
-        return None
+        error_msg = f"HTTP {e.response.status_code}"
+        if e.response.status_code == 404:
+            return {
+                'error': True,
+                'error_type': 'not_found',
+                'error_message': f'Model {model} not found. Try: ollama pull {model}'
+            }
+        return {
+            'error': True,
+            'error_type': 'http',
+            'error_message': error_msg
+        }
     except httpx.TimeoutException as e:
         logger.error("Timeout error querying model %s: Request took longer than %ss. Error: %s", model, timeout, e)
-        return None
+        return {
+            'error': True,
+            'error_type': 'timeout',
+            'error_message': f'Request timed out after {timeout}s'
+        }
     except Exception as e:
         logger.error("Unexpected error querying model %s: %s: %s", model, type(e).__name__, e)
-        return None
+        return {
+            'error': True,
+            'error_type': 'unknown',
+            'error_message': str(e)
+        }
 
 
 async def query_models_parallel(
     models: List[str],
     messages: List[Dict[str, str]],
     temperature: float | None = None,
-) -> Dict[str, Optional[Dict[str, Any]]]:
+) -> Dict[str, QueryResponse]:
     """
     Query multiple models in parallel.
 
     Args:
         models: List of Ollama model identifiers
         messages: List of message dicts to send to each model
+        temperature: Optional temperature for response generation
 
     Returns:
-        Dict mapping model identifier to response dict (or None if failed)
+        Dict mapping model identifier to QueryResponse (success or error dict)
     """
     import asyncio
 
@@ -151,7 +199,7 @@ async def query_models_with_stage_timeout(
     stage_timeout: float = 90.0,
     min_results: int = 3,
     temperature: float | None = None,
-) -> Dict[str, Optional[Dict[str, Any]]]:
+) -> Dict[str, QueryResponse]:
     """
     Query multiple models in parallel with overall stage timeout.
 
@@ -166,9 +214,10 @@ async def query_models_with_stage_timeout(
         stage: Optional stage identifier for debugging
         stage_timeout: Maximum time to wait for this stage (seconds)
         min_results: Minimum number of results to wait for before timeout applies
+        temperature: Optional temperature for response generation
 
     Returns:
-        Dict mapping model identifier to response dict
+        Dict mapping model identifier to QueryResponse (success or error dict)
     """
     import asyncio
     import time

@@ -81,7 +81,7 @@ const Stage1 = memo(function Stage1({ responses, timings, isStreaming }) {
           </div>
         ) : (
           <div className="response-text markdown-content">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentResponse.response}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>{currentResponse.response}</ReactMarkdown>
           </div>
         )}
       </div>

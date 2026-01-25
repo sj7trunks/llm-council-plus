@@ -5,6 +5,7 @@ import ModelSelector from './components/ModelSelector';
 import LoginScreen from './components/LoginScreen';
 import SetupWizard from './components/SetupWizard';
 import SettingsModal from './components/SettingsModal';
+import ErrorBoundary from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import { useAuthStore } from './store/authStore';
 import { api } from './api';
@@ -359,6 +360,11 @@ function App() {
 
           case 'stage1_model_response':
             // Add individual model response to stage1 array as it arrives
+            // Guard against malformed events
+            if (!event?.data?.model) {
+              console.warn('Received stage1_model_response without model data:', event);
+              break;
+            }
             // Show toast notification for errors (timeout, rate limit, etc.)
             if (event.data.error) {
               const modelName = event.data.model.split('/')[1] || event.data.model;
@@ -663,18 +669,20 @@ function App() {
         onDeleteAllConversations={handleDeleteAllConversations}
         onUpdateTitle={handleUpdateTitle}
       />
-      <ChatInterface
-        conversation={currentConversation}
-        onSendMessage={handleSendMessage}
-        onAbort={handleAbortStream}
-        onUploadFile={api.uploadFile}
-        isLoading={isLoading}
-        webSearchAvailable={webSearchAvailable}
-        tavilyEnabled={tavilyEnabled}
-        exaEnabled={exaEnabled}
-        duckduckgoEnabled={duckduckgoEnabled}
-        braveEnabled={braveEnabled}
-      />
+      <ErrorBoundary>
+        <ChatInterface
+          conversation={currentConversation}
+          onSendMessage={handleSendMessage}
+          onAbort={handleAbortStream}
+          onUploadFile={api.uploadFile}
+          isLoading={isLoading}
+          webSearchAvailable={webSearchAvailable}
+          tavilyEnabled={tavilyEnabled}
+          exaEnabled={exaEnabled}
+          duckduckgoEnabled={duckduckgoEnabled}
+          braveEnabled={braveEnabled}
+        />
+      </ErrorBoundary>
       <ModelSelector
         isOpen={showModelSelector}
         onClose={() => setShowModelSelector(false)}

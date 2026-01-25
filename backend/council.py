@@ -600,6 +600,8 @@ Search Results:
 
     # Use provided models or fall back to default
     council_models = models if models else COUNCIL_MODELS
+    if not council_models:
+        raise ValueError("No council models configured. Set COUNCIL_MODELS in .env or provide models in request.")
 
     logger.debug("[STAGE1] ========== STAGE 1: COLLECT RESPONSES ==========")
     logger.debug("[STAGE1] Query: %s...", user_query[:80])
@@ -719,6 +721,8 @@ Search Results:
 
     # Use provided models or fall back to default
     council_models = models if models else COUNCIL_MODELS
+    if not council_models:
+        raise ValueError("No council models configured. Set COUNCIL_MODELS in .env or provide models in request.")
 
     logger.debug("[STAGE1-STREAM] Messages count: %d (system=%d)", len(messages), sum(1 for m in messages if m.get('role')=='system'))
 

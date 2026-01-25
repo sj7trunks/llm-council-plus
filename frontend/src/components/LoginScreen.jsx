@@ -156,6 +156,7 @@ export default function LoginScreen({ onLogin }) {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
               className="form-input"
+              autoComplete="current-password"
               disabled={isLoading}
             />
           </div>

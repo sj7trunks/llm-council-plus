@@ -33,7 +33,7 @@ const Stage3 = memo(function Stage3({ finalResponse, timings }) {
           Chairman: {finalResponse.model.split('/')[1] || finalResponse.model}
         </div>
         <div className="final-text markdown-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{finalResponse.response}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>{finalResponse.response}</ReactMarkdown>
         </div>
       </div>
     </div>
