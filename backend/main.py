@@ -114,10 +114,11 @@ async def startup_event():
     # Initialize database tables if using database storage (Feature 2: Multi-DB support)
     init_database()
 
-# Enable CORS for local development
+# Enable CORS for development and external access
+# Use regex to allow any http or https origin (localhost, LAN IPs, public IPs)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5175", "http://localhost:3000", "http://localhost", "https://localhost", "http://127.0.0.1", "http://127.0.0.1:80"],
+    allow_origin_regex=r"^https?://.*$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

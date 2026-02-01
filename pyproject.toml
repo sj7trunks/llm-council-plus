@@ -31,4 +31,6 @@ dependencies = [
     "langchain-community>=0.0.20",
     "python-multipart>=0.0.21",
     "ddgs>=9.10.0",
+    "pyjwt>=2.10.1",
+    "bcrypt>=5.0.0",
 ]
