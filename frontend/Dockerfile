@@ -16,6 +16,10 @@ COPY . .
 ARG VITE_API_BASE=
 ENV VITE_API_BASE=$VITE_API_BASE
 
+# Build argument for base path (for serving from subpath like /llm-council-plus/)
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=$VITE_BASE_PATH
+
 # Build the application
 RUN npm run build
 
